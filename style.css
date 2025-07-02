@@ -1,0 +1,47 @@
+body {
+    margin: 0;
+    overflow: hidden;
+    background-color: #000; /* Pure black for vector feel */
+    color: #00ff00; /* Green glowing text */
+    font-family: 'Press Start 2P', cursive; /* A retro pixel font if you import it! */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+}
+
+/* Fallback font for the body if 'Press Start 2P' isn't loaded */
+body {
+    font-family: monospace, sans-serif;
+}
+
+/* You could add this to <head> to get the font */
+/*
+@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+*/
+
+h1 {
+    margin-bottom: 20px;
+    color: #00ff00; /* Green glowing title */
+    text-shadow: 0 0 5px #0f0, 0 0 10px #0f0, 0 0 15px #0f0; /* Basic glow */
+}
+
+canvas {
+    width: 80vw;
+    height: 80vh;
+    max-width: 900px;
+    max-height: 600px;
+    background-color: #000;
+    border: 2px solid #00ff00; /* Green border */
+    box-shadow: 0 0 15px #0f0; /* Canvas glow */
+    display: block;
+}
+
+.controls {
+    margin-top: 20px;
+    font-size: 0.9em;
+    text-align: center;
+    color: #00ff00;
+    text-shadow: 0 0 3px #0f0;
+}
