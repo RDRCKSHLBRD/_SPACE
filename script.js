@@ -227,7 +227,7 @@ async function initWebGPU() {
 
     createGeometry();
     createUniformBuffers();
-    await createPipeline();
+    await createPipeline(); // Await pipeline creation as it's async
     createBindGroups();
 
     generateObjects();
@@ -245,24 +245,20 @@ function createGeometry() {
     // Each pair of points defines a line segment.
     const vertices = new Float32Array([
         // Simple Asteroid-like shape (6 points, 6 lines to close it)
-        // 1st segment
-        -0.5, -0.2, 0.0,
-         0.0, -0.5, 0.0,
-        // 2nd segment
-         0.0, -0.5, 0.0,
-         0.5, -0.2, 0.0,
-        // 3rd segment
-         0.5, -0.2, 0.0,
-         0.3,  0.3, 0.0,
-        // 4th segment
-         0.3,  0.3, 0.0,
-        -0.2,  0.5, 0.0,
-        // 5th segment
-        -0.2,  0.5, 0.0,
-        -0.5,  0.2, 0.0,
-        // 6th segment (closing)
-        -0.5,  0.2, 0.0,
-        -0.5, -0.2, 0.0,
+        // Vertices ordered for line-list: (start_x, start_y, start_z, end_x, end_y, end_z)
+        // Each pair of (x,y,z) is a vertex. Each consecutive 2 vertices form a line.
+        -0.5, -0.2, 0.0, // V0
+         0.0, -0.5, 0.0, // V1
+         0.0, -0.5, 0.0, // V1 (duplicate to start new segment from same point)
+         0.5, -0.2, 0.0, // V2
+         0.5, -0.2, 0.0, // V2
+         0.3,  0.3, 0.0, // V3
+         0.3,  0.3, 0.0, // V3
+        -0.2,  0.5, 0.0, // V4
+        -0.2,  0.5, 0.0, // V4
+        -0.5,  0.2, 0.0, // V5
+        -0.5,  0.2, 0.0, // V5
+        -0.5, -0.2, 0.0, // V0 (closing segment)
     ]);
 
     vertexBuffer = device.createBuffer({
@@ -304,11 +300,13 @@ async function createPipeline() {
             };
             @group(0) @binding(1) var<uniform> models : ModelMatrices;
 
-            // Global line color for vector look
+            // Global line color for vector look (Now only used in fragment shader, but declared in group 0)
             struct LineColorUniform {
                 color : vec4<f32>,
             };
-            @group(0) @binding(2) var<uniform> lineColor : LineColorUniform;
+            // Note: This uniform is used to pass the color from vertex to fragment shader via 'out.vertex_color'.
+            // Therefore, it needs visibility in the VERTEX stage.
+            @group(0) @binding(2) var<uniform> lineColorUniform : LineColorUniform; // Renamed to avoid confusion
 
             struct VertexInput {
                 @location(0) position : vec3<f32>,
@@ -327,7 +325,7 @@ async function createPipeline() {
                 var out: VertexOutput;
                 let modelMatrix = models.matrices[instance_idx];
                 out.clip_position = camera.viewProjectionMatrix * modelMatrix * vec4<f32>(in.position, 1.0);
-                out.vertex_color = lineColor.color; // All lines are the same color
+                out.vertex_color = lineColorUniform.color; // All lines are the same color, sourced from the uniform
                 return out;
             }
 
@@ -351,8 +349,8 @@ async function createPipeline() {
                 buffer: { type: 'uniform', hasDynamicOffset: false, minBindingSize: OBJECT_COUNT * 16 * 4 },
             },
             {
-                binding: 2, // For global line color
-                visibility: GPUShaderStage.FRAGMENT,
+                binding: 2, // For global line color - FIX APPLIED HERE
+                visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, // Now visible to both
                 buffer: { type: 'uniform' },
             },
         ],
@@ -517,25 +515,24 @@ function setupInputHandling() {
 
 function updateCamera() {
     const moveSpeed = camera.speed;
-    const forwardVector = [0, 0, -1]; // Camera looks down -Z
-    const rightVector = [1, 0, 0];    // Camera's right is +X
-
+    // For simplicity, we're not rotating the camera's forward/right vectors based on its orientation.
+    // Movement is relative to world axes.
     let moved = false;
 
     if (keysPressed['w'] || keysPressed['arrowup']) {
-        camera.position[2] -= moveSpeed;
+        camera.position[2] -= moveSpeed; // Move forward along Z
         moved = true;
     }
     if (keysPressed['s'] || keysPressed['arrowdown']) {
-        camera.position[2] += moveSpeed;
+        camera.position[2] += moveSpeed; // Move backward along Z
         moved = true;
     }
     if (keysPressed['a'] || keysPressed['arrowleft']) {
-        camera.position[0] -= moveSpeed;
+        camera.position[0] -= moveSpeed; // Strafe left along X
         moved = true;
     }
     if (keysPressed['d'] || keysPressed['arrowright']) {
-        camera.position[0] += moveSpeed;
+        camera.position[0] += moveSpeed; // Strafe right along X
         moved = true;
     }
 
@@ -547,13 +544,18 @@ function updateCamera() {
 function updateObjects(deltaTime) {
     for (let i = 0; i < objects.length; i++) {
         const obj = objects[i];
-        // Move objects towards the camera
+        // Move objects towards the camera (simulating camera moving forward)
         obj.position[2] += obj.speed * deltaTime * 0.01; // Adjust speed by delta time
         obj.rotationZ += obj.rotationSpeed * deltaTime * 0.01; // Spin objects
 
-        // If object goes too far behind, reset it to the front
-        if (obj.position[2] > camera.position[2] + 5) {
-            obj.position[2] = camera.position[2] - 195; // Reset far away
+        // If object goes too far behind the camera, reset it to the front
+        // The camera is at camera.position[2], looking towards negative Z.
+        // Objects "pass" the camera when their Z position is greater than camera.position[2].
+        // We reset them far in front of the camera.
+        const resetThreshold = camera.position[2] + 5; // A bit in front of the camera
+        const spawnDistance = 200; // How far in front to re-spawn
+        if (obj.position[2] > resetThreshold) {
+            obj.position[2] = camera.position[2] - spawnDistance + (Math.random() * 10 - 5); // Add slight random variation
             obj.position[0] = (Math.random() - 0.5) * 40;
             obj.position[1] = (Math.random() - 0.5) * 40;
             obj.rotationZ = Math.random() * Math.PI * 2;
@@ -573,6 +575,8 @@ function updateProjectionMatrix(aspect) {
 
 function updateViewMatrix() {
     const eye = camera.position;
+    // The "center" point defines where the camera is looking.
+    // For a simple first-person "flying" game, it's just a point directly in front of the camera.
     const center = [camera.position[0], camera.position[1], camera.position[2] - 1]; // Look slightly forward
     const up = [0, 1, 0]; // Y-axis is up
     mat4_lookAt(camera.viewMatrix, eye, center, up);
@@ -633,7 +637,8 @@ function renderLoop(currentTime) {
     passEncoder.setPipeline(pipeline);
     passEncoder.setBindGroup(0, bindGroup);
     passEncoder.setVertexBuffer(0, vertexBuffer);
-    passEncoder.draw(vertexBuffer.byteLength / 4 / 3, OBJECT_COUNT); // (num_vertices * floats_per_vertex) / 4 bytes/float / 3 xyz components = num_vertices
+    // The number of vertices to draw. Our asteroid shape has 12 vertices (6 lines * 2 vertices/line).
+    passEncoder.draw(12, OBJECT_COUNT); // Fixed to 12 vertices for the asteroid shape
     passEncoder.end();
 
     device.queue.submit([commandEncoder.finish()]);
